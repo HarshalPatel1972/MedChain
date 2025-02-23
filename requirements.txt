@@ -4,5 +4,4 @@ pillow
 opencv-python
 pyzbar
 numpy
-verbwire
 web3
