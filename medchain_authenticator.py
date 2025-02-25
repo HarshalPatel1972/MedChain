@@ -1,4 +1,6 @@
 import streamlit as st
+st.set_page_config(page_title="MedChain Authenticator", layout="wide")
+
 import random
 import json
 import os
@@ -11,13 +13,38 @@ from pyzbar.pyzbar import decode
 # ---------------------------
 # Configuration
 # ---------------------------
-# Use a relative path so that it works on Streamlit Cloud if the file is in the same repo.
 MAPPING_FILE = "./barcode_mapping.json"
+
+# ---------------------------
+# Custom CSS for Fixed Button Size
+# ---------------------------
+st.markdown("""
+<style>
+body {
+    background-color: #f9f9f9;
+    font-family: Arial, sans-serif;
+    color: #333;
+}
+h1, h2, h3, h4 {
+    color: #2e7bcf;
+}
+.stButton > button {
+    width: 300px;
+    height: 50px;
+    font-size: 16px;
+    font-weight: 600;
+    background-color: #2e7bcf !important;
+    color: white !important;
+    border-radius: 5px !important;
+    border: none;
+    margin-bottom: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------
 # Helper Functions
 # ---------------------------
-
 def load_mapping():
     """
     Loads the barcode mapping JSON file (which contains GTIN -> product details).
@@ -42,7 +69,7 @@ def lookup_gtin(gtin_input, mapping):
     with a 'gtin' field inside each product's details.
     """
     for product_name, details in mapping.items():
-        if details.get("gtin") == gtin_input:
+        if details.get("gtin", "").strip() == gtin_input.strip():
             return details
     return None
 
@@ -70,12 +97,11 @@ def decode_barcode(image: Image.Image) -> str:
 # ---------------------------
 # Streamlit App UI
 # ---------------------------
-st.set_page_config(page_title="MedChain Authenticator", layout="wide")
 st.title("MedChain Authenticator")
 st.markdown("### Verify Product Authenticity Using AI + Barcode Lookup")
 st.write("Scan a product image or its barcode to determine if it's authentic, and retrieve product details.")
 
-# Create two tabs: one for product image verification and one for barcode verification.
+# Create two tabs: Product Image Verification and Barcode Verification.
 product_tab, barcode_tab = st.tabs(["Product Image Verification", "Barcode Verification"])
 
 # ---------------------------
@@ -103,44 +129,72 @@ with product_tab:
 # ---------------------------
 with barcode_tab:
     st.header("Barcode Verification")
-    st.markdown("You can either manually enter the barcode (GTIN) or scan a barcode image.")
+    st.markdown("You can either manually enter the barcode (GTIN), upload a barcode image, or take a photo with your camera.")
     
-    # Radio buttons to choose input method
-    method = st.radio("Select Barcode Input Method", ("Enter Manually", "Scan Barcode Image"))
-    
+    # Reset state when the tab loads (fresh start)
+    if "barcode_method" not in st.session_state:
+        st.session_state["barcode_method"] = None
+        st.session_state["barcode_value"] = None
+
+    st.markdown("#### Select Input Method:")
+
+    # Old style vertical buttons (each will be full-width as per custom CSS)
+    if st.button("✍️ Enter Code Manually", key="manual"):
+        st.session_state["barcode_method"] = "manual"
+    if st.button("📁 Upload Barcode Image", key="upload"):
+        st.session_state["barcode_method"] = "upload"
+    if st.button("📸 Take Photo with Camera", key="camera"):
+        st.session_state["barcode_method"] = "camera"
+
     barcode_value = None
-    if method == "Enter Manually":
+
+    # Display corresponding input widget based on selected method.
+    if st.session_state["barcode_method"] == "manual":
         barcode_value = st.text_input("Enter product barcode (GTIN)")
-    else:
+    elif st.session_state["barcode_method"] == "upload":
         barcode_image_file = st.file_uploader("Upload barcode image", type=["jpg", "jpeg", "png"], key="barcode")
         if barcode_image_file is not None:
             barcode_image = Image.open(barcode_image_file)
-            st.image(barcode_image, caption="Uploaded Barcode Image", use_column_width=True)
+            st.image(barcode_image, caption="Uploaded Barcode Image", width=300)
             decoded_value = decode_barcode(barcode_image)
             if decoded_value:
                 barcode_value = decoded_value
                 st.success(f"Decoded Barcode: **{barcode_value}**")
             else:
                 st.error("Could not decode barcode.")
-    
-    # Button to verify the barcode
-    if st.button("Verify Barcode"):
-        if barcode_value:
-            # Load the mapping from the JSON file
-            mapping_data = load_mapping()
-            if not mapping_data:
-                st.error("Mapping data is empty or could not be loaded.")
-            else:
-                # Lookup the GTIN in the mapping
-                product_info = lookup_gtin(barcode_value, mapping_data)
-                if product_info:
-                    st.subheader("Product Details:")
-                    st.markdown(f"**Product Name:** {product_info.get('product_name', 'N/A')}")
-                    st.markdown(f"**Manufacturer:** {product_info.get('manufacturer', 'N/A')}")
-                    st.markdown(f"**GTIN:** {product_info.get('gtin', 'N/A')}")
-                    st.markdown(f"**Manufacturing Date:** {product_info.get('mfg_date', 'N/A')}")
-                    st.markdown(f"**Expiry Date:** {product_info.get('expiry_date', 'N/A')}")
+    elif st.session_state["barcode_method"] == "camera":
+        camera_file = st.camera_input("Capture a photo of the barcode")
+        if camera_file is not None:
+            try:
+                camera_image = Image.open(camera_file).convert("RGB")
+                st.image(camera_image, caption="Captured Image", width=200)
+                decoded_value = decode_barcode(camera_image)
+                if decoded_value:
+                    barcode_value = decoded_value
+                    st.success(f"Decoded Barcode: **{barcode_value}**")
                 else:
-                    st.error("Barcode (GTIN) not found in mapping.")
-        else:
-            st.error("Please enter or scan a valid barcode.")
+                    st.error("No barcode detected in the captured photo.")
+            except Exception as e:
+                st.error(f"Error processing camera image: {e}")
+
+    # Only show "Verify Barcode" if a method is selected.
+    if st.session_state["barcode_method"]:
+        if st.button("Verify Barcode"):
+            if barcode_value:
+                st.session_state["barcode_value"] = barcode_value
+                mapping_data = load_mapping()
+                if not mapping_data:
+                    st.error("Mapping data is empty or could not be loaded.")
+                else:
+                    product_info = lookup_gtin(barcode_value, mapping_data)
+                    if product_info:
+                        st.subheader("Product Details:")
+                        st.markdown(f"**Product Name:** {product_info.get('product_name', 'N/A')}")
+                        st.markdown(f"**Manufacturer:** {product_info.get('manufacturer', 'N/A')}")
+                        st.markdown(f"**GTIN:** {product_info.get('gtin', 'N/A')}")
+                        st.markdown(f"**Manufacturing Date:** {product_info.get('mfg_date', 'N/A')}")
+                        st.markdown(f"**Expiry Date:** {product_info.get('expiry_date', 'N/A')}")
+                    else:
+                        st.error("Barcode (GTIN) not found in mapping.")
+            else:
+                st.error("Please enter or scan a valid barcode.")
