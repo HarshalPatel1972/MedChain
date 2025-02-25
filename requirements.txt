@@ -5,3 +5,4 @@ opencv-python
 pyzbar
 numpy
 web3
+python-barcode
